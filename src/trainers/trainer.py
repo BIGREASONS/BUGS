@@ -1,4 +1,5 @@
 import os
+import json
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -6,6 +7,8 @@ from transformers import get_linear_schedule_with_warmup
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support, matthews_corrcoef
 import numpy as np
 from typing import Dict, Any
+from src.utils.losses import FocalLoss
+from configs.config import Config
 
 class Trainer:
     def __init__(
@@ -32,12 +35,20 @@ class Trainer:
         self.checkpoint_dir = checkpoint_dir
         
         os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self._log_hyperparameters()
+        self._log_class_distribution()
         
-        # Setup Loss
-        if class_weights is not None:
+        # Setup Dynamic Loss Function
+        if Config.LOSS_TYPE == 'focal':
+            alpha = class_weights.to(device) if (Config.FOCAL_ALPHA == 'class_weights' and class_weights is not None) else None
+            self.criterion = FocalLoss(gamma=Config.FOCAL_GAMMA, alpha=alpha)
+            print(f"Using Focal Loss (gamma={Config.FOCAL_GAMMA}, alpha={Config.FOCAL_ALPHA})")
+        elif Config.LOSS_TYPE == 'weighted_ce' and class_weights is not None:
             self.criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+            print("Using Weighted CrossEntropyLoss")
         else:
             self.criterion = nn.CrossEntropyLoss()
+            print("Using standard CrossEntropyLoss")
             
         # Setup Optimizer
         no_decay = ['bias', 'LayerNorm.weight']
@@ -58,6 +69,26 @@ class Trainer:
         # Setup Mixed Precision
         self.scaler = torch.amp.GradScaler('cuda')
 
+    def _log_hyperparameters(self):
+        """Saves config state to the experiment directory."""
+        config_dict = {k: v for k, v in Config.__dict__.items() if not k.startswith('__') and not callable(v)}
+        config_path = os.path.join(self.checkpoint_dir, 'config.json')
+        with open(config_path, 'w') as f:
+            json.dump(config_dict, f, indent=4)
+            
+    def _log_class_distribution(self):
+        """Computes and logs class distribution of the training set."""
+        all_labels = []
+        for batch in self.train_loader:
+            all_labels.extend(batch['label'].tolist())
+            
+        unique, counts = np.unique(all_labels, return_counts=True)
+        dist = dict(zip(unique, counts))
+        print(f"\nTraining Class Distribution: {dist}")
+        
+        with open(os.path.join(self.checkpoint_dir, 'class_distribution.json'), 'w') as f:
+            json.dump(dist, f, indent=4)
+
     def train_epoch(self) -> float:
         self.model.train()
         total_loss = 0
@@ -69,6 +100,7 @@ class Trainer:
             labels = batch['label'].to(self.device)
             
             with torch.amp.autocast('cuda'):
+                # Handle baseline which doesn't use metrics vs fusion
                 logits = self.model(input_ids, attention_mask, metrics_tensor)
                 loss = self.criterion(logits, labels)
                 loss = loss / self.accumulation_steps
@@ -138,13 +170,11 @@ class Trainer:
             
             print(f"Train Loss: {train_loss:.4f} | Valid Loss: {val_metrics['loss']:.4f} | Valid Macro F1: {val_metrics['F1 (Macro)']:.4f}")
             
-            # Early Stopping based on Macro F1
             if val_metrics['F1 (Macro)'] > best_f1:
                 best_f1 = val_metrics['F1 (Macro)']
                 best_metrics = val_metrics
                 patience_counter = 0
                 
-                # Save checkpoint
                 torch.save(self.model.state_dict(), os.path.join(self.checkpoint_dir, 'best_model.pt'))
                 print("Checkpoint saved!")
             else:
@@ -154,6 +184,5 @@ class Trainer:
                 print("Early stopping triggered!")
                 break
                 
-        # Load best model before returning
         self.model.load_state_dict(torch.load(os.path.join(self.checkpoint_dir, 'best_model.pt')))
         return best_metrics

@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from transformers import RobertaModel
+from src.models.modules import MetricEncoder
 
 class FusionModel(nn.Module):
     def __init__(self, model_name: str = 'microsoft/graphcodebert-base', num_classes: int = 4, dropout_rate: float = 0.2):
@@ -8,7 +9,7 @@ class FusionModel(nn.Module):
         Fusion Model combining GraphCodeBERT and Complexity Metrics.
         Architecture:
         GraphCodeBERT -> CLS Token (768)
-        Metrics Branch -> 10 -> 64
+        Metrics Branch -> MetricEncoder -> 64
         Concatenate -> 832
         MLP -> 256
         Dropout
@@ -21,12 +22,7 @@ class FusionModel(nn.Module):
         text_dim = self.encoder.config.hidden_size # 768
         
         # Metrics Branch
-        self.metrics_branch = nn.Sequential(
-            nn.Linear(10, 32),
-            nn.ReLU(),
-            nn.Linear(32, 64),
-            nn.ReLU()
-        )
+        self.metrics_branch = MetricEncoder(dropout=dropout_rate)
         metrics_dim = 64
         
         fusion_dim = text_dim + metrics_dim # 832

@@ -1,23 +1,20 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import TransformerConv, global_mean_pool
+from torch_geometric.nn import TransformerConv
+from src.models.modules import MetricEncoder
 
 class BSPGraphTransformer(nn.Module):
-    def __init__(self, in_channels: int = 768 + 10, hidden_dim: int = 256, heads: int = 8, num_classes: int = 4, dropout: float = 0.2):
+    def __init__(self, cls_dim: int = 768, num_classes: int = 4, hidden_dim: int = 256, heads: int = 8, dropout: float = 0.2):
         """
         BSPTEGT-Inspired Graph Transformer Adaptation.
-        Input: Node Features (GraphCodeBERT CLS embeddings [768] + 10 complexity metrics [10]) = 778
-        Architecture:
-        Node Features -> Graph Transformer Layer -> Graph Transformer Layer -> Linear Layer -> 4 Classes
         """
         super(BSPGraphTransformer, self).__init__()
         
-        # Graph Transformer Layers
-        # TransformerConv expects in_channels, out_channels (per head), heads
-        # out_channels * heads should equal hidden_dim to maintain dimension, or we can use concat=False
+        self.metric_encoder = MetricEncoder(dropout=dropout)
         
-        # Layer 1
+        in_channels = cls_dim + 64 # 768 + 64 = 832
+        
         self.conv1 = TransformerConv(
             in_channels=in_channels, 
             out_channels=hidden_dim // heads, 
@@ -26,7 +23,6 @@ class BSPGraphTransformer(nn.Module):
             concat=True
         )
         
-        # Layer 2
         self.conv2 = TransformerConv(
             in_channels=hidden_dim, 
             out_channels=hidden_dim // heads, 
@@ -35,7 +31,6 @@ class BSPGraphTransformer(nn.Module):
             concat=True
         )
         
-        # Classification Head (per node classification)
         self.classifier = nn.Sequential(
             nn.Linear(hidden_dim, hidden_dim // 2),
             nn.ReLU(),
@@ -44,14 +39,15 @@ class BSPGraphTransformer(nn.Module):
         )
         
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        """
-        Forward pass for per-node classification in a Graph.
-        Args:
-            x: Node feature matrix of shape (num_nodes, in_channels)
-            edge_index: Graph connectivity matrix of shape (2, num_edges)
-        Returns:
-            logits: Tensor of shape (num_nodes, num_classes)
-        """
+        # Split raw features
+        cls_feat = x[:, :768]
+        metrics_raw = x[:, 768:]
+        
+        # Encode metrics
+        metrics_encoded = self.metric_encoder(metrics_raw)
+        
+        # Recombine
+        x = torch.cat([cls_feat, metrics_encoded], dim=1)
         
         # Layer 1
         x = self.conv1(x, edge_index)
@@ -63,7 +59,5 @@ class BSPGraphTransformer(nn.Module):
         x = F.relu(x)
         x = F.dropout(x, p=self.conv2.dropout, training=self.training)
         
-        # Predict class for each node directly
         logits = self.classifier(x)
-        
         return logits

@@ -1,10 +1,14 @@
 import os
 import json
 import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+from configs.config import Config
 
 class ComparisonPipeline:
-    def __init__(self, results_dir: str = 'outputs/results'):
-        self.results_dir = results_dir
+    def __init__(self, results_dir: str = None):
+        self.results_dir = results_dir if results_dir else Config.RESULTS_DIR
+        os.makedirs(self.results_dir, exist_ok=True)
         
     def load_metrics(self) -> pd.DataFrame:
         metrics_list = []
@@ -19,57 +23,87 @@ class ComparisonPipeline:
         return df
 
     def generate_performance_tables(self):
-        print("Generating Performance Tables...")
+        print("Generating Publication-Quality Performance Tables...")
         df = self.load_metrics()
         
         if df.empty:
-            print("No results found. Run train.py and train_graph.py first.")
+            print("No results found. Run training scripts first.")
             return
             
-        print("\n=== Performance Table ===")
-        # Reorder columns
-        columns = ['Model', 'Accuracy', 'Precision (Macro)', 'Recall (Macro)', 'F1 (Macro)', 'F1 (Weighted)', 'MCC']
-        df = df[columns]
-        print(df.to_string(index=False))
+        columns = ['Model', 'Accuracy', 'Precision (Macro)', 'Recall (Macro)', 'F1 (Macro)', 'MCC']
+        # Filter columns that exist
+        columns = [c for c in columns if c in df.columns]
+        df_table = df[columns].copy()
         
-        # Save table
-        df.to_csv(os.path.join(self.results_dir, 'final_performance_table.csv'), index=False)
-        print(f"\nSaved performance table to {os.path.join(self.results_dir, 'final_performance_table.csv')}")
-        
-    def generate_rankings(self, metric: str = 'F1 (Macro)'):
-        print(f"\nGenerating Model Rankings based on {metric}...")
+        # Round to 4 decimal places
+        for col in columns[1:]:
+            df_table[col] = df_table[col].apply(lambda x: f"{x:.4f}")
+            
+        # Markdown Table
+        md_caption = "Table 1. Comparative performance of all evaluated models on the generated dataset. The highest metric per category represents the optimal architecture for the severity classification task."
+        md_table = df_table.to_markdown(index=False)
+        with open(os.path.join(self.results_dir, 'performance_table.md'), 'w') as f:
+            f.write(f"{md_table}\n\n{md_caption}")
+            
+        # LaTeX Table
+        latex_table = df_table.to_latex(index=False, float_format="%.4f", caption="Comparative performance of all evaluated models.", label="tab:performance")
+        with open(os.path.join(self.results_dir, 'performance_table.tex'), 'w') as f:
+            f.write(latex_table)
+            
+        print("Markdown and LaTeX tables saved to results directory.")
+
+    def plot_comparison_chart(self):
         df = self.load_metrics()
-        if df.empty:
+        if df.empty or 'F1 (Macro)' not in df.columns:
             return
             
-        ranked_df = df.sort_values(by=metric, ascending=False)
-        print(f"\n=== Rankings ({metric}) ===")
-        for i, row in enumerate(ranked_df.itertuples()):
-            print(f"{i+1}. {row.Model} - {getattr(row, metric.replace(' ', '_').replace('(', '').replace(')', '')):.4f}")
-            
+        plt.figure(figsize=(8, 5))
+        sns.barplot(data=df, x='Model', y='F1 (Macro)', palette='Blues_d')
+        plt.title('Model Comparison: Macro F1 Score')
+        plt.ylabel('Macro F1')
+        plt.xlabel('Architecture')
+        plt.ylim(0, 1.0)
+        plt.tight_layout()
+        
+        plt.savefig(os.path.join(self.results_dir, 'comparison_bar_chart.png'), dpi=300)
+        plt.savefig(os.path.join(self.results_dir, 'comparison_bar_chart.pdf'), bbox_inches='tight')
+        plt.savefig(os.path.join(self.results_dir, 'comparison_bar_chart.svg'), format='svg')
+        plt.close()
+        print("Comparison charts generated.")
+
     def run_ablation_study(self):
-        print("\nGenerating Ablation Study Results...")
         df = self.load_metrics()
         if df.empty:
             return
             
-        print("\n=== Ablation Study ===")
         ablation_map = {
-            'XGBoost': 'A: Metrics Only',
-            'GraphCodeBERT': 'B: GraphCodeBERT Only',
-            'FusionModel': 'C: GraphCodeBERT + Metrics',
-            'GraphTransformer': 'D: GraphCodeBERT + Metrics + Graph Transformer'
+            'XGBoost': 'Metrics Only',
+            'GraphCodeBERT': 'GCB Only',
+            'FusionModel': '+ Metrics Fusion',
+            'GraphTransformer': '+ Graph Transformer'
         }
         
-        # Map existing models if their names match
         if 'Model' in df.columns:
             df['Ablation Phase'] = df['Model'].map(ablation_map)
             df = df.dropna(subset=['Ablation Phase'])
-            df = df[['Ablation Phase', 'F1 (Macro)', 'MCC']].sort_values(by='Ablation Phase')
-            print(df.to_string(index=False))
+            if df.empty:
+                return
+                
+            plt.figure(figsize=(8, 5))
+            sns.lineplot(data=df, x='Ablation Phase', y='F1 (Macro)', marker='o', linewidth=2)
+            plt.title('Ablation Study: Architectural Progression')
+            plt.ylabel('Macro F1 Score')
+            plt.xlabel('Phase')
+            plt.grid(True, linestyle='--', alpha=0.7)
+            plt.tight_layout()
+            
+            plt.savefig(os.path.join(self.results_dir, 'ablation_study.png'), dpi=300)
+            plt.savefig(os.path.join(self.results_dir, 'ablation_study.pdf'), bbox_inches='tight')
+            plt.close()
+            print("Ablation charts generated.")
         
 if __name__ == "__main__":
     pipeline = ComparisonPipeline()
     pipeline.generate_performance_tables()
-    pipeline.generate_rankings()
+    pipeline.plot_comparison_chart()
     pipeline.run_ablation_study()

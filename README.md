@@ -1,97 +1,58 @@
-# Bug Severity Prediction System
+# Bug Severity Prediction via Hybrid Semantics and Graph Transformation
 
-A research-grade bug severity prediction system predicting 4 severity classes (Critical, Major, Medium, Minor) using complexity metrics and abstract syntax representations from GraphCodeBERT.
+This repository contains the official implementation of our research on software bug severity prediction. We propose a hybrid architecture that leverages abstract syntax token sequences (GraphCodeBERT), structural software complexity metrics, and graph-based relational learning (Graph Transformer) to robustly classify bug severity into four discrete classes: Critical, Major, Medium, and Minor.
 
-## Repository Structure
+## Abstract
+Accurate classification of software bug severity remains a critical challenge in software maintenance. Traditional approaches rely solely on historical text or basic metrics, often failing to capture deep contextual logic and structural degradation simultaneously. In this artifact, we present a multi-modal fusion architecture combined with a strictly inductive Graph Transformer. By mapping individual bugs as nodes in a similarity graph, we facilitate message passing between structurally related logic errors. Empirical evaluations demonstrate the architectural progression from XGBoost baselines to our proposed Graph Transformer.
 
-```text
-project/
-├── configs/            # Configuration files
-├── data/               # Place train.jsonl, valid.jsonl, test.jsonl here
-├── notebooks/          # Exploratory Jupyter notebooks
-├── outputs/            # Checkpoints, results, and generated graphs
-├── src/
-│   ├── baselines/      # XGBoost baseline implementation
-│   ├── datasets/       # PyTorch Dataset and DataLoader wrappers
-│   ├── evaluation/     # Metrics calculation (F1, MCC, Accuracy, etc.)
-│   ├── graphs/         # Cosine-similarity based graph construction
-│   ├── models/         # GraphCodeBERT, Fusion Model, Graph Transformer
-│   ├── trainers/       # Mixed precision training loop with early stopping
-│   └── utils/          # Helper functions
-├── comparison.py       # Ablation studies and result generation
-├── requirements.txt    # Dependencies
-├── train.py            # Primary training script (Baselines & Fusion)
-└── train_graph.py      # Graph construction and Transformer training
-```
+## Dataset
+The experiments are conducted on a unified dataset combining Defects4J and Bugs.jar. 
+- **Splits:** `train.jsonl`, `valid.jsonl`, `test.jsonl`
+- **Features:** Source code (tokenized to length 512) and 10 structural complexity metrics (McCabe, Halstead, etc.).
+- **Imbalance:** Natural class imbalance is managed via Focal Loss ($\gamma=2.0$, $\alpha$ derived from inverse class frequencies).
 
-## Setup & Local Verification
+## Methodology
+We ablate the system across four stages:
+1. **XGBoost Baseline:** Decision trees trained strictly on $Z$-score normalized structural metrics.
+2. **GraphCodeBERT:** RoBERTa-based deep semantic tokenization of source code.
+3. **Fusion Architecture:** Concatenation of the GraphCodeBERT `[CLS]` embedding with a parallel `MetricEncoder` (Dense $\rightarrow$ BatchNorm $\rightarrow$ ReLU $\rightarrow$ Dropout $\rightarrow$ Dense).
+4. **Graph Transformer:** Graph-based learning. Nodes are connected via cosine similarity ($>0.80$) over their hybrid embeddings.
 
-1. Install dependencies:
+### Leakage Prevention
+To prevent train-test data leakage, our system strictly enforces an inductive graph evaluation. Test and validation embeddings are transformed via `StandardScaler` fitted *only* on the training set, and message passing is confined solely to the isolated training graph. Inference on test nodes is inherently 0-hop.
+
+## Experimental Setup
+### Environment
+- PyTorch 2.x, PyTorch Geometric, HuggingFace Transformers
+- GPU: Evaluated on 2x Tesla T4 (16GB VRAM each)
+- Training utilizes Mixed Precision (`torch.amp.autocast`) and Gradient Accumulation for memory-safe scaling.
+
+### Installation
 ```bash
+git clone https://github.com/BIGREASONS/BUGS.git
+cd BUGS
 pip install -r requirements.txt
 ```
 
-2. Place your data files in the `data/` directory:
-- `train.jsonl`
-- `valid.jsonl`
-- `test.jsonl`
+### Reproducibility
+A fixed random seed (`42`) is enforced across `numpy` and `torch`. All experiments automatically log hyperparameters to `outputs/publication_v1/config.json`.
 
-3. Verify the training script runs:
+## Usage
+**1. Train Text & Fusion Baselines**
 ```bash
-python train.py --help
+python train.py --model all
 ```
 
-## Kaggle Training Workflow (Recommended)
-
-To leverage 2 Tesla T4 GPUs effectively, use the GitHub to Kaggle workflow.
-
-1. **Push to GitHub**:
-```bash
-git init
-git add .
-git commit -m "Initial research implementation"
-git branch -M main
-git remote add origin https://github.com/YOUR_USERNAME/BugSeverityPrediction.git
-git push -u origin main
-```
-
-2. **Clone on Kaggle**:
-In a new Kaggle Notebook (with GPU & Internet Enabled):
-```bash
-!git clone https://github.com/YOUR_USERNAME/BugSeverityPrediction.git
-%cd BugSeverityPrediction
-!pip install -r requirements.txt
-```
-
-3. **Mount Data**:
-Upload your JSONL files as a Kaggle Dataset and mount it. Update `configs/config.py` paths or create a symlink:
-```bash
-!ln -s /kaggle/input/your-dataset-name/ data
-```
-
-## Experiment Phases
-
-### Phase 1: Baselines & Fusion
-Train the sequential and fusion models.
-```bash
-# XGBoost
-python train.py --model xgboost
-
-# GraphCodeBERT
-python train.py --model graphcodebert
-
-# Fusion Model
-python train.py --model fusion
-```
-
-### Phase 2: Graph Transformer
-After validating Phase 1, extract embeddings, construct the similarity graph, and train the BSPGraphTransformer:
+**2. Train Graph Transformer**
 ```bash
 python train_graph.py
 ```
 
-### Phase 3: Ablation Study
-Compare all results:
+**3. Generate Publication Artifacts**
 ```bash
 python comparison.py
 ```
+This generates LaTeX tables, Markdown summaries, and matplotlib visualizations (`outputs/publication_v1/results/`).
+
+## Future Work
+Future extensions will explore dynamic thresholding for cosine similarity matrices and the integration of AST abstract syntax trees natively into the GraphCodeBERT cross-attention layers.

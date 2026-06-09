@@ -78,11 +78,19 @@ class XGBoostBaseline:
         importance = self.model.feature_importances_
         return {self.metric_keys[i]: float(importance[i]) for i in range(len(self.metric_keys))}
 
+from sklearn.preprocessing import StandardScaler
+
 def run_xgboost_baseline(train_path: str, valid_path: str, test_path: str):
     print("Loading data for XGBoost...")
     X_train, y_train = load_metrics_data(train_path)
     X_valid, y_valid = load_metrics_data(valid_path)
     X_test, y_test = load_metrics_data(test_path)
+    
+    print("Applying StandardScaler to complexity metrics...")
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(X_train)
+    X_valid = scaler.transform(X_valid)
+    X_test = scaler.transform(X_test)
     
     print("Training XGBoost baseline...")
     xgb_baseline = XGBoostBaseline()

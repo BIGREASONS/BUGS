@@ -32,11 +32,12 @@ def main():
     if args.model in ['xgboost', 'all']:
         print("\n--- Running XGBoost Baseline ---")
         if os.path.exists(Config.TRAIN_PATH):
-            xgb_metrics, xgb_importance = run_xgboost_baseline(
+            xgb_metrics, xgb_importance, xgb_y_true, xgb_y_pred = run_xgboost_baseline(
                 Config.TRAIN_PATH, Config.VALID_PATH, Config.TEST_PATH
             )
             xgb_metrics['Model'] = 'XGBoost'
-            evaluator.save_results(xgb_metrics, np.zeros((4,4)), [], [], prefix='XGBoost')
+            xgb_cm = evaluator.generate_confusion_matrix(xgb_y_true, xgb_y_pred)
+            evaluator.save_results(xgb_metrics, xgb_cm, xgb_y_true, xgb_y_pred, prefix='XGBoost')
         else:
             print("Data files not found. Please place JSONL files in data/ directory.")
 
@@ -53,6 +54,14 @@ def main():
             max_length=Config.MAX_LENGTH,
             num_workers=Config.NUM_WORKERS
         )
+        
+        # Compute class weights for Focal Loss / Weighted CE
+        all_labels = [int(item.get('label', 0)) for item in train_loader.dataset.data]
+        class_counts = np.bincount(all_labels, minlength=Config.NUM_CLASSES)
+        total_samples = len(all_labels)
+        class_weights_np = total_samples / (Config.NUM_CLASSES * np.maximum(class_counts, 1.0))
+        class_weights = torch.tensor(class_weights_np, dtype=torch.float)
+        print(f"Computed Class Weights: {class_weights_np}")
 
         if args.model in ['graphcodebert', 'all']:
             print("\n--- Training GraphCodeBERT Baseline ---")
@@ -64,13 +73,15 @@ def main():
                 device=device, epochs=Config.EPOCHS, learning_rate=Config.LEARNING_RATE,
                 weight_decay=Config.WEIGHT_DECAY, accumulation_steps=Config.ACCUMULATION_STEPS,
                 early_stopping_patience=Config.EARLY_STOPPING_PATIENCE,
-                checkpoint_dir=os.path.join(Config.CHECKPOINT_DIR, 'gcb')
+                checkpoint_dir=os.path.join(Config.CHECKPOINT_DIR, 'gcb'),
+                class_weights=class_weights
             )
             gcb_best_metrics = trainer_gcb.train()
             print("\nEvaluating GraphCodeBERT on Test Set...")
-            gcb_test_metrics = trainer_gcb.evaluate(test_loader)
+            gcb_test_metrics, gcb_y_true, gcb_y_pred = trainer_gcb.evaluate(test_loader)
             gcb_test_metrics['Model'] = 'GraphCodeBERT'
-            evaluator.save_results(gcb_test_metrics, np.zeros((4,4)), [], [], prefix='GraphCodeBERT')
+            gcb_cm = evaluator.generate_confusion_matrix(gcb_y_true, gcb_y_pred)
+            evaluator.save_results(gcb_test_metrics, gcb_cm, gcb_y_true, gcb_y_pred, prefix='GraphCodeBERT')
 
         if args.model in ['fusion', 'all']:
             print("\n--- Training Fusion Model (GraphCodeBERT + Metrics) ---")
@@ -82,13 +93,15 @@ def main():
                 device=device, epochs=Config.EPOCHS, learning_rate=Config.LEARNING_RATE,
                 weight_decay=Config.WEIGHT_DECAY, accumulation_steps=Config.ACCUMULATION_STEPS,
                 early_stopping_patience=Config.EARLY_STOPPING_PATIENCE,
-                checkpoint_dir=os.path.join(Config.CHECKPOINT_DIR, 'fusion')
+                checkpoint_dir=os.path.join(Config.CHECKPOINT_DIR, 'fusion'),
+                class_weights=class_weights
             )
             fusion_best_metrics = trainer_fusion.train()
             print("\nEvaluating Fusion Model on Test Set...")
-            fusion_test_metrics = trainer_fusion.evaluate(test_loader)
+            fusion_test_metrics, fusion_y_true, fusion_y_pred = trainer_fusion.evaluate(test_loader)
             fusion_test_metrics['Model'] = 'FusionModel'
-            evaluator.save_results(fusion_test_metrics, np.zeros((4,4)), [], [], prefix='FusionModel')
+            fusion_cm = evaluator.generate_confusion_matrix(fusion_y_true, fusion_y_pred)
+            evaluator.save_results(fusion_test_metrics, fusion_cm, fusion_y_true, fusion_y_pred, prefix='FusionModel')
 
 if __name__ == "__main__":
     main()

@@ -117,7 +117,7 @@ class Trainer:
             
         return total_loss / len(self.train_loader)
 
-    def evaluate(self, loader: DataLoader) -> Dict[str, Any]:
+    def evaluate(self, loader: DataLoader) -> tuple[Dict[str, Any], np.ndarray, np.ndarray]:
         self.model.eval()
         total_loss = 0
         all_preds = []
@@ -140,13 +140,15 @@ class Trainer:
                 all_labels.extend(labels.cpu().numpy())
                 
         avg_loss = total_loss / len(loader)
+        all_labels = np.array(all_labels)
+        all_preds = np.array(all_preds)
         
         acc = accuracy_score(all_labels, all_preds)
         p_macro, r_macro, f1_macro, _ = precision_recall_fscore_support(all_labels, all_preds, average='macro', zero_division=0)
         p_weighted, r_weighted, f1_weighted, _ = precision_recall_fscore_support(all_labels, all_preds, average='weighted', zero_division=0)
         mcc = matthews_corrcoef(all_labels, all_preds)
         
-        return {
+        metrics = {
             'loss': avg_loss,
             'Accuracy': acc,
             'Precision (Macro)': p_macro,
@@ -157,6 +159,7 @@ class Trainer:
             'F1 (Weighted)': f1_weighted,
             'MCC': mcc
         }
+        return metrics, all_labels, all_preds
 
     def train(self) -> Dict[str, Any]:
         best_f1 = 0.0
@@ -166,7 +169,7 @@ class Trainer:
         for epoch in range(self.epochs):
             print(f"Epoch {epoch + 1}/{self.epochs}")
             train_loss = self.train_epoch()
-            val_metrics = self.evaluate(self.valid_loader)
+            val_metrics, _, _ = self.evaluate(self.valid_loader)
             
             print(f"Train Loss: {train_loss:.4f} | Valid Loss: {val_metrics['loss']:.4f} | Valid Macro F1: {val_metrics['F1 (Macro)']:.4f}")
             

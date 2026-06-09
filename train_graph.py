@@ -83,13 +83,11 @@ def main():
     gcb_model_path = os.path.join(Config.CHECKPOINT_DIR, 'gcb', 'best_model.pt')
     
     if not os.path.exists(gcb_model_path):
-        print(f"Pre-trained GraphCodeBERT not found at {gcb_model_path}. Run train.py first.")
-        # Create a dummy model for pipeline demonstration if missing
-        print("Using untrained GraphCodeBERT to extract features for demonstration.")
+        print(f"CRITICAL ERROR: Pre-trained GraphCodeBERT not found at {gcb_model_path}. Run train.py first.")
+        print("Aborting. You must have a trained GraphCodeBERT to extract valid structural features.")
+        return
         
-    else:
-        gcb_model.load_state_dict(torch.load(gcb_model_path, map_location=device))
-        
+    gcb_model.load_state_dict(torch.load(gcb_model_path, map_location=device, weights_only=True))
     gcb_model = gcb_model.to(device)
     
     print("\n--- Extracting Node Features ---")
@@ -112,7 +110,7 @@ def main():
     
     print("\n--- Training Graph Transformer Model ---")
     gt_model = BSPGraphTransformer(
-        in_channels=Config.MODEL_NAME.endswith('base') and 778 or 778, # 768 + 10
+        cls_dim=768,
         hidden_dim=Config.GT_HIDDEN_DIM,
         heads=Config.GT_HEADS,
         num_classes=Config.NUM_CLASSES,

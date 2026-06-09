@@ -63,7 +63,7 @@ class XGBoostBaseline:
         
         mcc = matthews_corrcoef(y_test, preds)
         
-        return {
+        metrics = {
             'Accuracy': acc,
             'Precision (Macro)': p_macro,
             'Recall (Macro)': r_macro,
@@ -73,6 +73,7 @@ class XGBoostBaseline:
             'F1 (Weighted)': f1_weighted,
             'MCC': mcc
         }
+        return metrics, y_test, preds
 
     def get_feature_importance(self) -> Dict[str, float]:
         importance = self.model.feature_importances_
@@ -97,7 +98,7 @@ def run_xgboost_baseline(train_path: str, valid_path: str, test_path: str):
     xgb_baseline.train(X_train, y_train, X_valid, y_valid)
     
     print("Evaluating XGBoost baseline on test set...")
-    metrics = xgb_baseline.evaluate(X_test, y_test)
+    metrics, y_true, y_pred = xgb_baseline.evaluate(X_test, y_test)
     for k, v in metrics.items():
         print(f"{k}: {v:.4f}")
         
@@ -106,4 +107,4 @@ def run_xgboost_baseline(train_path: str, valid_path: str, test_path: str):
     for k, v in sorted(importances.items(), key=lambda item: item[1], reverse=True):
         print(f"{k}: {v:.4f}")
         
-    return metrics, importances
+    return metrics, importances, y_true, y_pred

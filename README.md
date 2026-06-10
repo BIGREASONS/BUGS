@@ -1,58 +1,72 @@
-# Bug Severity Prediction via Hybrid Semantics and Graph Transformation
+# Bug Severity Prediction Based on Text Embedding via Graph Transformer (BSPTEGT)
 
-This repository contains the official implementation of our research on software bug severity prediction. We propose a hybrid architecture that leverages abstract syntax token sequences (GraphCodeBERT), structural software complexity metrics, and graph-based relational learning (Graph Transformer) to robustly classify bug severity into four discrete classes: Critical, Major, Medium, and Minor.
+This repository contains a clean, PyTorch-based adaptation of the BSPTEGT methodology for source code bug severity prediction. 
 
-## Abstract
-Accurate classification of software bug severity remains a critical challenge in software maintenance. Traditional approaches rely solely on historical text or basic metrics, often failing to capture deep contextual logic and structural degradation simultaneously. In this artifact, we present a multi-modal fusion architecture combined with a strictly inductive Graph Transformer. By mapping individual bugs as nodes in a similarity graph, we facilitate message passing between structurally related logic errors. Empirical evaluations demonstrate the architectural progression from XGBoost baselines to our proposed Graph Transformer.
+It replaces the original Bugzilla text embeddings with **GraphCodeBERT** code embeddings, constructing a semantic similarity graph and applying a **Graph Transformer** to predict bug severity (Critical, Major, Medium, Minor).
 
-## Dataset
-The experiments are conducted on a unified dataset combining Defects4J and Bugs.jar. 
-- **Splits:** `train.jsonl`, `valid.jsonl`, `test.jsonl`
-- **Features:** Source code (tokenized to length 512) and 10 structural complexity metrics (McCabe, Halstead, etc.).
-- **Imbalance:** Natural class imbalance is managed via Focal Loss ($\gamma=2.0$, $\alpha$ derived from inverse class frequencies).
+## Architecture
 
-## Methodology
-We ablate the system across four stages:
-1. **XGBoost Baseline:** Decision trees trained strictly on $Z$-score normalized structural metrics.
-2. **GraphCodeBERT:** RoBERTa-based deep semantic tokenization of source code.
-3. **Fusion Architecture:** Concatenation of the GraphCodeBERT `[CLS]` embedding with a parallel `MetricEncoder` (Dense $\rightarrow$ BatchNorm $\rightarrow$ ReLU $\rightarrow$ Dropout $\rightarrow$ Dense).
-4. **Graph Transformer:** Graph-based learning. Nodes are connected via cosine similarity ($>0.80$) over their hybrid embeddings.
+The pipeline consists of three stages:
 
-### Leakage Prevention
-To prevent train-test data leakage, our system strictly enforces an inductive graph evaluation. Test and validation embeddings are transformed via `StandardScaler` fitted *only* on the training set, and message passing is confined solely to the isolated training graph. Inference on test nodes is inherently 0-hop.
+1. **Embedding Fine-Tuning**: A GraphCodeBERT classifier is fine-tuned on the source code to learn task-specific representations.
+2. **Feature Extraction & Graph Construction**: The fine-tuned model extracts `[CLS]` embeddings. A semantic similarity graph is built where edges connect structurally or semantically similar code snippets.
+3. **Graph Transformer Training**: A 2-layer Graph Transformer processes the graph, aggregating information from similar bugs to improve the final prediction.
 
-## Experimental Setup
-### Environment
-- PyTorch 2.x, PyTorch Geometric, HuggingFace Transformers
-- GPU: Evaluated on 2x Tesla T4 (16GB VRAM each)
-- Training utilizes Mixed Precision (`torch.amp.autocast`) and Gradient Accumulation for memory-safe scaling.
+## Dataset Setup
 
-### Installation
+Place your JSONL data files in the `data/` directory:
+- `data/train.jsonl`
+- `data/valid.jsonl`
+- `data/test.jsonl`
+
+Each JSONL record must contain:
+- `code_no_comment`: Source code string
+- `label`: Integer severity label (0-3)
+- Complexity metrics: `lc`, `pi`, `ma`, `nbd`, `ml`, `d`, `mi`, `fo`, `r`, `e`
+
+## Usage
+
 ```bash
-git clone https://github.com/BIGREASONS/BUGS.git
-cd BUGS
 pip install -r requirements.txt
 ```
 
-### Reproducibility
-A fixed random seed (`42`) is enforced across `numpy` and `torch`. All experiments automatically log hyperparameters to `outputs/publication_v1/config.json`.
+### Full Pipeline
 
-## Usage
-**1. Train Text & Fusion Baselines**
+To run the entire 3-stage pipeline end-to-end:
 ```bash
-python train.py --model all
+python train.py
 ```
 
-**2. Train Graph Transformer**
+### Modular Execution
+
+If you have already fine-tuned the embedder and want to test different graph construction methods (e.g., changing the similarity threshold in `configs/config.py`), you can skip Stage 1:
+
 ```bash
-python train_graph.py
+python train.py --skip-finetune
 ```
 
-**3. Generate Publication Artifacts**
-```bash
-python comparison.py
-```
-This generates LaTeX tables, Markdown summaries, and matplotlib visualizations (`outputs/publication_v1/results/`).
+If you have already extracted and cached the embeddings to disk, you can skip both Stage 1 and Stage 2 to rapidly iterate on the Graph Transformer architecture:
 
-## Future Work
-Future extensions will explore dynamic thresholding for cosine similarity matrices and the integration of AST abstract syntax trees natively into the GraphCodeBERT cross-attention layers.
+```bash
+python train.py --skip-finetune --skip-extraction
+```
+
+## Configuration
+
+All hyperparameters and graph construction options are located in `configs/config.py`. 
+
+Key graph options:
+- `GRAPH_TYPE`: `'similarity'` (default), `'similarity_plus_metrics'`, `'knn'`, or `'none'`
+- `GRAPH_SIMILARITY_THRESHOLD`: Cosine similarity cutoff (e.g., 0.80)
+- `GRAPH_EVAL_MODE`: `'inductive_attachment'` (test nodes are attached to training graph for message passing) or `'strict_inductive'` (test nodes receive 0 edges, serving as an MLP baseline).
+
+## Limitation
+
+The original BSPTEGT paper uses bug-report text (summary + description).
+
+This work adapts the BSPTEGT architecture to source-code representations generated by GraphCodeBERT because Defects4J and Bugs.jar primarily provide code artifacts rather than issue-tracker metadata.
+
+## Acknowledgments
+
+Adapted from the methodology described in:
+*Bug Severity Prediction Based on Text Embedding via Graph Transformer (BSPTEGT)*

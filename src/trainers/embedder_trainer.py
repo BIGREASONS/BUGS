@@ -153,13 +153,8 @@ class EmbedderTrainer:
                 metrics_tensor = batch['metrics_tensor'].to(self.device)
                 labels         = batch['label'].to(self.device)
 
-                if self.use_amp:
-                    with torch.amp.autocast('cuda'):
-                        logits = self.model(input_ids, attention_mask, metrics_tensor)
-                        loss   = self.criterion(logits, labels)
-                else:
-                    logits = self.model(input_ids, attention_mask, metrics_tensor)
-                    loss   = self.criterion(logits, labels)
+                logits = self.model(input_ids, attention_mask, metrics_tensor)
+                loss   = self.criterion(logits, labels)
 
                 total_loss += loss.item()
                 all_preds.extend(torch.argmax(logits, dim=1).cpu().numpy())

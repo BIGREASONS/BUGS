@@ -76,7 +76,7 @@ def extract_features(
             else:
                 emb = model(input_ids, attention_mask, return_embeddings=True)
 
-            all_emb.append(emb.cpu())
+            all_emb.append(emb.float().cpu())
             all_met.append(batch['metrics_tensor'])
             all_lbl.append(batch['label'])
 

@@ -126,11 +126,7 @@ class BSPTEGTTrainer:
         eval_g = eval_graph.to(self.device)
 
         with torch.no_grad():
-            if self.use_amp:
-                with torch.amp.autocast('cuda'):
-                    logits = self.model(eval_g.x, eval_g.edge_index)
-            else:
-                logits = self.model(eval_g.x, eval_g.edge_index)
+            logits = self.model(eval_g.x, eval_g.edge_index)
 
             eval_logits = logits[num_train_nodes:]
             eval_labels = eval_g.y[num_train_nodes:]
